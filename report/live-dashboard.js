@@ -223,8 +223,8 @@ function analyzeIssues(pv, pc) {
   if (!pc) {
     issues.push({ level: 'info', tag: 'CMP',
       message: 'No post-consent beacon received',
-      rootCause: 'Either (1) new visitor who has not interacted with consent banner yet, or (2) cmpEventLoadFinished trigger not yet added to Tracking Health Monitor GTM tag.',
-      fix: 'Add cmpEventLoadFinished as a second trigger to the Tracking Health Monitor tag in GTM.' });
+      rootCause: 'Either (1) new visitor with no prior consent cookie, or (2) the GTM script still uses the old version which does not set eventType — both beacons look identical so they cannot be paired.',
+      fix: 'Update the Tracking Health Monitor GTM script to the latest version (detects {{Event}} variable and sends eventType: post-consent on cmpEventLoadFinished).' });
   } else {
     // Meta Pixel
     if (given === true && !pcTags.metaPixel) {
@@ -282,24 +282,30 @@ function groupVisits(visits) {
     var v = sorted[i];
     var group = { pageView: null, postConsent: null };
 
+    // Explicit post-consent beacon with no matching page-view
     if (v.eventType === 'post-consent') {
       group.postConsent = v;
-    } else {
-      group.pageView = v;
-      // Look for matching post-consent beacon within 3 min
-      for (var j = i + 1; j < sorted.length; j++) {
-        if (used[j]) continue;
-        var v2 = sorted[j];
-        if (v2.eventType !== 'post-consent') continue;
-        if (v2.ip !== v.ip || v2.domain !== v.domain || v2.path !== v.path) continue;
-        var diff = new Date(v2.receivedAt || 0) - new Date(v.receivedAt || 0);
-        if (diff > 0 && diff < 180000) {
-          group.postConsent = v2;
-          used[j] = true;
-          break;
-        }
-      }
+      used[i] = true;
+      groups.push(group);
+      continue;
     }
+
+    group.pageView = v;
+
+    // Look for a second beacon from the same session (same IP+domain+path within 3 min).
+    // Accept regardless of eventType — old GTM script doesn't set it.
+    // Prefer explicit 'post-consent', otherwise take any second beacon that arrived later.
+    for (var j = i + 1; j < sorted.length; j++) {
+      if (used[j]) continue;
+      var v2 = sorted[j];
+      if (v2.ip !== v.ip || v2.domain !== v.domain || v2.path !== v.path) continue;
+      var diff = new Date(v2.receivedAt || 0) - new Date(v.receivedAt || 0);
+      if (diff <= 0 || diff > 180000) continue;
+      group.postConsent = v2;
+      used[j] = true;
+      break;
+    }
+
     used[i] = true;
     groups.push(group);
   }
@@ -471,8 +477,8 @@ function showDetail(idx) {
     html += '</div></div>';
   } else {
     html += '<div class="tl-item"><div class="tl-dot tl-dot-gray"></div><div class="tl-content">';
-    html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — not received</div>';
-    html += '<div style="font-size:11px;color:#475569;margin-top:4px">Either a new visitor (no consent cookie) or the monitoring tag does not have the cmpEventLoadFinished trigger yet.</div>';
+    html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — second beacon not paired</div>';
+    html += '<div style="font-size:11px;color:#f59e0b;margin-top:4px">⚠ If you already added cmpEventLoadFinished trigger: the GTM script needs updating — it must detect <code>{{Event}}</code> and send <code>eventType: "post-consent"</code> so the two beacons can be matched. Copy the latest script below.</div>';
     html += '</div></div>';
   }
   html += '</div>';
