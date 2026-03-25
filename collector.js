@@ -88,7 +88,7 @@ async function readVisitorStats(days = 7, requesterIp = '') {
     return tb - ta;
   });
 
-  const recentVisits = visits.slice(0, 500).map((v) => ({
+  const recentVisits = visits.slice(0, 1000).map((v) => ({
     ...v,
     timestampIST: toIST(v.receivedAt || v.timestamp),
     isYou: requesterIp && v.ip === requesterIp,

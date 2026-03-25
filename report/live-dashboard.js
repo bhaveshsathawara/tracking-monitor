@@ -101,6 +101,14 @@ td{padding:8px 10px;vertical-align:middle}
 .raw-toggle:hover{background:#334155}
 pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;font-size:10px;color:#64748b;overflow-x:auto;margin-top:6px;line-height:1.5;max-height:300px;overflow-y:auto}
 
+/* Detail tabs */
+.dp-tabs{display:flex;border-bottom:1px solid #1e293b;padding:0 16px;background:#0a1628;flex-shrink:0}
+.dp-tab{background:none;border:none;border-bottom:2px solid transparent;color:#64748b;padding:10px 14px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap}
+.dp-tab.active{color:#f1f5f9;border-bottom-color:#3b82f6}
+.dp-tab:hover:not(.active){color:#e2e8f0}
+#myip-input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:4px 10px;border-radius:6px;font-size:12px;width:190px;outline:none}
+#myip-input:focus{border-color:#22c55e}
+
 /* Loading */
 #loading{position:fixed;inset:0;background:#020617;display:flex;align-items:center;justify-content:center;z-index:100;font-size:16px;color:#64748b}
 </style>
@@ -134,8 +142,10 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
   <button class="filter-btn" data-filter="post-consent">Post-Consent only</button>
   <button class="filter-btn" data-filter="issues">Issues only</button>
   <button class="filter-btn" data-filter="you">My visits</button>
+  <input id="myip-input" type="text" placeholder="Your fr.igraal.com IP…" title="Enter your IP to highlight your visits (different from dashboard viewer IP)">
   <input id="search" type="text" placeholder="Search domain / path / IP…">
   <button class="filter-btn" onclick="reload()" style="margin-left:auto">↻ Refresh</button>
+  <span id="countdown-display" style="color:#475569;font-size:11px">Auto-refresh in <span id="countdown-num">30</span>s</span>
 </div>
 
 <!-- Main -->
@@ -171,11 +181,14 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
 <script>
 var allVisits = [];
 var yourIp = '';
+var myIp = '';       // IP set manually by user to find their own visits
 var byDomain = {};
 var activeFilter = 'all';
 var activeSearch = '';
 var activeDomain = '';
 var selectedIdx = -1;
+var refreshTimer = null;
+var refreshCountdown = 30;
 
 /* ── Helpers ─────────────────────────────── */
 function toIST(iso) {
@@ -187,6 +200,20 @@ function toIST(iso) {
 
 function timeDiffMs(a, b) {
   return new Date(b).getTime() - new Date(a).getTime();
+}
+
+// Extract path+query from full URL, fall back to path field
+function fullPath(v) {
+  if (v.url) {
+    try { return new URL(v.url).pathname + new URL(v.url).search; } catch(e) {}
+  }
+  return v.path || '/';
+}
+
+function isMyVisit(v) {
+  if (!v) return false;
+  if (myIp && v.ip === myIp) return true;
+  return false;
 }
 
 function consentColor(given) {
@@ -341,7 +368,7 @@ function getFilteredGroups() {
     if (activeFilter === 'post-consent' && !pc) return false;
     if (activeFilter === 'you') {
       var v = pv || pc;
-      if (!v || !v.isYou) return false;
+      if (!v || !isMyVisit(v)) return false;
     }
     if (activeFilter === 'issues') {
       var iss = analyzeIssues(pv, pc);
@@ -368,7 +395,7 @@ function renderList() {
     var hasWarn = !hasError && issues.some(function(i) { return i.level === 'warning'; });
     if (hasError) issueCount++;
 
-    var isYou = v && v.isYou;
+    var isYou = v && isMyVisit(v);
     var ts = toIST(v && (v.receivedAt || v.timestamp));
     var eventBadge = pc && pv ? '<span class="badge bg-green">Both</span>'
                    : pc ? '<span class="badge bg-blue">Post</span>'
@@ -378,11 +405,12 @@ function renderList() {
                   : issues.length > 0 ? '<span class="badge bg-blue">Info</span>'
                   : '<span style="color:#22c55e;font-size:11px">✓ OK</span>';
     var ipDisplay = isYou ? '<span style="color:#22c55e;font-weight:700">' + (v.ip||'—') + ' 👈</span>' : '<span style="color:#64748b">' + (v.ip||'—') + '</span>';
+    var fp = fullPath(v || {});
 
     html += '<tr data-idx="' + idx + '" class="' + (isYou ? 'you-row' : '') + (selectedIdx === idx ? ' selected' : '') + '" onclick="showDetail(' + idx + ')">';
     html += '<td><code>' + ts + '</code></td>';
     html += '<td>' + ipDisplay + '</td>';
-    html += '<td><span style="color:#e2e8f0">' + (v&&v.domain||'—') + '</span><span style="color:#475569;margin-left:4px">' + (v&&v.path||'') + '</span></td>';
+    html += '<td><span style="color:#e2e8f0">' + (v&&v.domain||'—') + '</span><span style="color:#475569;margin-left:4px;font-family:monospace;font-size:11px" title="' + (v&&v.url||'') + '">' + fp + '</span></td>';
     html += '<td>' + eventBadge + '</td>';
     html += '<td><span style="color:' + consentColor(consent.given) + ';font-size:11px">' + consentLabel(consent.given) + '</span></td>';
     html += '<td style="text-align:center">' + tagDot(tags.gtmLoaded) + '</td>';
@@ -419,20 +447,32 @@ function showDetail(idx) {
   var row = document.querySelector('#visit-tbody tr[data-idx="' + idx + '"]');
   if (row) row.classList.add('selected');
 
+  var errorCount = issues.filter(function(i){return i.level==='error'||i.level==='critical';}).length;
   var html = '';
 
-  /* Meta info */
-  html += '<div class="dp-section"><h3>Visit Info</h3>';
-  html += row_(pv, 'Time (IST)', toIST(v && (v.receivedAt || v.timestamp)));
-  html += row_(pv, 'IP', (v&&v.ip||'—') + (v&&v.isYou ? ' <span class="badge bg-green" style="font-size:9px">You</span>' : ''));
-  html += row_(pv, 'Domain', v&&v.domain||'—');
-  html += row_(pv, 'Path', '<code>' + (v&&v.path||'—') + '</code>');
-  html += row_(pv, 'Referrer', (v&&v.referrer) ? '<code style="font-size:10px">' + v.referrer + '</code>' : '<span style="color:#475569">Direct / None</span>');
-  html += row_(pv, 'Language', v&&v.language||'—');
-  html += row_(pv, 'CMP Vendor', (v&&v.consent&&v.consent.vendor) || '<span style="color:#475569">Not detected</span>');
+  /* Tab nav */
+  html += '<div class="dp-tabs">';
+  html += '<button class="dp-tab active" data-tab="timeline" onclick="switchTab(\\'timeline\\')">Timeline</button>';
+  html += '<button class="dp-tab" data-tab="issues" onclick="switchTab(\\'issues\\')">Issues' + (errorCount > 0 ? ' <span style="color:#f87171;font-size:10px">● ' + errorCount + '</span>' : '') + '</button>';
+  html += '<button class="dp-tab" data-tab="pageview" onclick="switchTab(\\'pageview\\')">Pageview Data</button>';
+  html += '<button class="dp-tab" data-tab="raw" onclick="switchTab(\\'raw\\')">Raw JSON</button>';
   html += '</div>';
 
-  /* Timeline */
+  /* ── Tab: Timeline (default visible) ── */
+  html += '<div id="dp-tab-timeline">';
+
+  /* Visit Info */
+  html += '<div class="dp-section"><h3>Visit Info</h3>';
+  html += row_(null, 'Time (IST)', toIST(v && (v.receivedAt || v.timestamp)));
+  html += row_(null, 'IP', (v&&v.ip||'—') + (isMyVisit(v) ? ' <span class="badge bg-green" style="font-size:9px">You</span>' : ''));
+  html += row_(null, 'Domain', v&&v.domain||'—');
+  html += row_(null, 'URL', '<code style="font-size:10px;word-break:break-all">' + (v&&v.url||v&&v.path||'—') + '</code>');
+  html += row_(null, 'Referrer', (v&&v.referrer) ? '<code style="font-size:10px">' + v.referrer + '</code>' : '<span style="color:#475569">Direct / None</span>');
+  html += row_(null, 'Language', v&&v.language||'—');
+  html += row_(null, 'CMP Vendor', (v&&v.consent&&v.consent.vendor) || '<span style="color:#475569">Not detected</span>');
+  html += '</div>';
+
+  /* Debug Timeline */
   html += '<div class="dp-section"><h3>Debug Timeline</h3>';
 
   if (pv) {
@@ -464,8 +504,6 @@ function showDetail(idx) {
     html += tagBadge('TikTok', pcTags.tiktok, 'Fired ✅', 'Not fired ❌');
     html += '</div>';
     html += '<div style="margin-top:6px;font-size:11px;color:' + consentColor(pc.consent&&pc.consent.given) + '">Consent: ' + consentLabel(pc.consent&&pc.consent.given) + (pc.consent&&pc.consent.vendor ? ' via ' + pc.consent.vendor : '') + '</div>';
-
-    // Tag IDs
     if (pc.tagIds) {
       if (pc.tagIds.meta && pc.tagIds.meta.length) {
         html += '<div style="margin-top:4px;font-size:11px;color:#64748b">Meta Pixel IDs: <code>' + pc.tagIds.meta.join(', ') + '</code></div>';
@@ -478,12 +516,15 @@ function showDetail(idx) {
   } else {
     html += '<div class="tl-item"><div class="tl-dot tl-dot-gray"></div><div class="tl-content">';
     html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — second beacon not paired</div>';
-    html += '<div style="font-size:11px;color:#f59e0b;margin-top:4px">⚠ If you already added cmpEventLoadFinished trigger: the GTM script needs updating — it must detect <code>{{Event}}</code> and send <code>eventType: "post-consent"</code> so the two beacons can be matched. Copy the latest script below.</div>';
+    html += '<div style="font-size:11px;color:#f59e0b;margin-top:4px">⚠ If you already added cmpEventLoadFinished trigger: the GTM script needs updating — it must detect <code>{{Event}}</code> and send <code>eventType: "post-consent"</code> so the two beacons can be matched.</div>';
     html += '</div></div>';
   }
-  html += '</div>';
+  html += '</div>'; // dp-section timeline
 
-  /* Issues */
+  html += '</div>'; // dp-tab-timeline
+
+  /* ── Tab: Issues ── */
+  html += '<div id="dp-tab-issues" style="display:none">';
   html += '<div class="dp-section"><h3>Issues & Analysis</h3>';
   if (issues.length === 0) {
     html += '<div class="issue issue-ok"><h4>✓ No issues detected</h4><p>All tags fired correctly relative to consent state.</p></div>';
@@ -502,8 +543,47 @@ function showDetail(idx) {
     });
   }
   html += '</div>';
+  html += '</div>'; // dp-tab-issues
 
-  /* Raw payload */
+  /* ── Tab: Pageview Data ── */
+  html += '<div id="dp-tab-pageview" style="display:none">';
+  function beaconFields(b, title) {
+    if (!b) return '<div class="dp-section" style="color:#475569">' + title + ' — not received</div>';
+    var t = b.tags || {};
+    var ids = b.tagIds || {};
+    var c = b.consent || {};
+    var s = '<div class="dp-section"><h3>' + title + '</h3>';
+    s += row_(null, 'eventType', '<code>' + (b.eventType || 'page-view') + '</code>');
+    s += row_(null, 'receivedAt', '<code style="font-size:10px">' + (b.receivedAt || b.timestamp || '—') + '</code>');
+    s += row_(null, 'url', '<code style="font-size:10px;word-break:break-all">' + (b.url || '—') + '</code>');
+    s += row_(null, 'domain', b.domain || '—');
+    s += row_(null, 'path', '<code>' + (b.path || '—') + '</code>');
+    s += row_(null, 'referrer', b.referrer || '<span style="color:#475569">—</span>');
+    s += row_(null, 'language', b.language || '—');
+    s += row_(null, 'ip', '<code>' + (b.ip || '—') + '</code>');
+    s += '<div style="margin:8px 0 4px;font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.5px">Tags</div>';
+    s += row_(null, 'gtmLoaded', t.gtmLoaded ? '<span style="color:#22c55e">✅ true</span>' : '<span style="color:#f87171">❌ false</span>');
+    s += row_(null, 'metaPixel', t.metaPixel ? '<span style="color:#22c55e">✅ true</span>' : '<span style="color:#f87171">❌ false</span>');
+    s += row_(null, 'googleAds', t.googleAds ? '<span style="color:#22c55e">✅ true</span>' : '<span style="color:#f87171">❌ false</span>');
+    s += row_(null, 'tiktok', t.tiktok ? '<span style="color:#22c55e">✅ true</span>' : '<span style="color:#f87171">❌ false</span>');
+    if (ids.meta && ids.meta.length) {
+      s += row_(null, 'meta pixel IDs', '<code>' + ids.meta.join(', ') + '</code>');
+    }
+    if (ids.googleAds && ids.googleAds.length) {
+      s += row_(null, 'google ads IDs', '<code>' + ids.googleAds.join(', ') + '</code>');
+    }
+    s += '<div style="margin:8px 0 4px;font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.5px">Consent</div>';
+    s += row_(null, 'vendor', c.vendor || '<span style="color:#475569">—</span>');
+    s += row_(null, 'given', c.given === true ? '<span style="color:#22c55e">✅ true</span>' : c.given === false ? '<span style="color:#f87171">❌ false</span>' : '<span style="color:#64748b">— unknown</span>');
+    s += '</div>';
+    return s;
+  }
+  html += beaconFields(pv, 'Page View Beacon');
+  html += beaconFields(pc, 'Post-Consent Beacon');
+  html += '</div>'; // dp-tab-pageview
+
+  /* ── Tab: Raw JSON ── */
+  html += '<div id="dp-tab-raw" style="display:none">';
   html += '<div class="dp-section"><h3>Raw Payload</h3>';
   if (pv) {
     html += '<button class="raw-toggle" onclick="toggleRaw(\\'raw-pv\\')">▶ Page View beacon</button>';
@@ -514,6 +594,7 @@ function showDetail(idx) {
     html += '<pre id="raw-pc" style="display:none">' + JSON.stringify(pc, null, 2) + '</pre>';
   }
   html += '</div>';
+  html += '</div>'; // dp-tab-raw
 
   document.getElementById('detail-content').innerHTML = html;
   document.getElementById('detail-pane').style.display = 'block';
@@ -554,6 +635,36 @@ document.getElementById('search').addEventListener('input', function() {
   renderList();
 });
 
+/* ── Tab switching ──────────────────────── */
+function switchTab(tab) {
+  var tabs = ['timeline', 'issues', 'pageview', 'raw'];
+  tabs.forEach(function(t) {
+    var el = document.getElementById('dp-tab-' + t);
+    if (el) el.style.display = t === tab ? 'block' : 'none';
+  });
+  document.querySelectorAll('.dp-tab').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+}
+
+/* ── Auto-refresh countdown ─────────────── */
+function startCountdown() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshCountdown = 30;
+  var numEl = document.getElementById('countdown-num');
+  if (numEl) numEl.textContent = refreshCountdown;
+  refreshTimer = setInterval(function() {
+    refreshCountdown--;
+    var el = document.getElementById('countdown-num');
+    if (el) el.textContent = Math.max(0, refreshCountdown);
+    if (refreshCountdown <= 0) {
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+      reload();
+    }
+  }, 1000);
+}
+
 /* ── Load data ──────────────────────────── */
 function reload() {
   document.getElementById('loading').style.display = 'flex';
@@ -569,11 +680,17 @@ function reload() {
       renderDomainCards();
       renderList();
       document.getElementById('loading').style.display = 'none';
+      startCountdown();
     })
     .catch(function(e) {
       document.getElementById('loading').innerHTML = 'Error loading data: ' + e.message;
     });
 }
+
+document.getElementById('myip-input').addEventListener('input', function() {
+  myIp = this.value.trim();
+  renderList();
+});
 
 reload();
 </script>
