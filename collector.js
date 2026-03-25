@@ -6,6 +6,7 @@
 const http = require('http');
 const fs   = require('fs/promises');
 const path = require('path');
+const { getDashboardHtml } = require('./report/live-dashboard');
 
 // ✅ Improved PORT handling (Railway + local compatible)
 const PORT = Number(process.env.PORT) || Number(process.env.COLLECTOR_PORT) || 3001;
@@ -167,6 +168,14 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.writeHead(200);
     res.end(JSON.stringify({ ip }));
+    return;
+  }
+
+  // ── GET /dashboard ───────────────────────────────────────
+  if (req.method === 'GET' && req.url === '/dashboard') {
+    res.setHeader('Content-Type', 'text/html');
+    res.writeHead(200);
+    res.end(getDashboardHtml());
     return;
   }
 
