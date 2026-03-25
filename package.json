@@ -1,0 +1,16 @@
+{
+  "name": "tracking-monitor",
+  "version": "3.0.0",
+  "description": "Monitors GTM, Google Ads, and Meta Pixel across multiple domains with CMP detection, pre-consent analysis, sitemap auto-discovery, and email alerts",
+  "scripts": {
+    "start":     "node scheduler.js",
+    "collector": "node collector.js",
+    "scan-once": "node index.js"
+  },
+  "keywords": ["tracking", "gtm", "google-ads", "meta-pixel", "puppeteer", "monitoring", "cmp", "gdpr"],
+  "license": "MIT",
+  "dependencies": {
+    "nodemailer": "^6.9.0",
+    "puppeteer":  "^22.0.0"
+  }
+}

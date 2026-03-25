@@ -1,0 +1,6 @@
+node_modules/
+logs/
+reports/
+alerts.log
+.env
+*.local

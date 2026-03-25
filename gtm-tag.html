@@ -1,0 +1,123 @@
+<!--
+  ════════════════════════════════════════════════════════════════════
+  TRACKING MONITOR — GTM Custom HTML Tag
+  ════════════════════════════════════════════════════════════════════
+
+  SETUP INSTRUCTIONS (Step by step):
+
+  1. Start your collector server first:
+       node collector.js
+     Then deploy it publicly (see deployment guide below).
+
+  2. In GTM:
+     → Tags → New → Custom HTML
+     → Paste this entire file contents
+     → Replace YOUR_COLLECTOR_URL with your deployed server URL
+     → Triggering: All Pages
+     → Name it: "Tracking Health Monitor"
+
+  3. Publish your GTM container.
+
+  That's it. Every real visitor will now send data to your dashboard.
+
+  DEPLOYMENT (so real visitors can reach the server):
+  - Railway:  Create new project → "Deploy from GitHub" → point to this folder → set start command: node collector.js
+  - The URL Railway gives you (e.g. https://tracking-monitor-xxx.railway.app) is your COLLECTOR_URL
+  ════════════════════════════════════════════════════════════════════
+-->
+<script>
+(function() {
+  // ── CONFIGURE THIS ────────────────────────────────────────────────────────
+  var COLLECTOR_URL = 'https://YOUR_COLLECTOR_URL/collect';
+  // ─────────────────────────────────────────────────────────────────────────
+
+  try {
+    // ── Detect CMP and consent state ───────────────────────────────────────
+    function getConsentStatus() {
+      try {
+        if (window.Cookiebot)   return { vendor: 'Cookiebot',   given: window.Cookiebot.consented };
+        if (window.OneTrust)    return { vendor: 'OneTrust',    given: !!window.OneTrust.IsAlertBoxClosed && window.OneTrust.IsAlertBoxClosed() };
+        if (window.Didomi)      return { vendor: 'Didomi',      given: null };
+        if (window.axeptio)     return { vendor: 'Axeptio',     given: null };
+        if (window.tarteaucitron) return { vendor: 'Tarteaucitron', given: null };
+        if (window.__tcfapi)    return { vendor: 'TCF v2',      given: null };
+        return { vendor: null, given: null };
+      } catch(e) { return { vendor: null, given: null }; }
+    }
+
+    // ── Detect which tags are loaded (JavaScript globals) ──────────────────
+    function getTagStatus() {
+      var dl = window.dataLayer || [];
+      var events = dl.filter(function(e){ return e && e.event; }).map(function(e){ return e.event; });
+      return {
+        gtm:       !!(window.google_tag_manager),
+        meta:      typeof window.fbq === 'function',
+        googleAds: typeof window.gtag === 'function',
+        ga4:       typeof window.gtag === 'function',
+        dataLayerEvents: events.slice(-10),
+        dataLayerLength: dl.length
+      };
+    }
+
+    // ── Detect Meta Pixel IDs ───────────────────────────────────────────────
+    function getMetaPixelIds() {
+      try {
+        if (window._fbq && window._fbq.pixelsByID) return Object.keys(window._fbq.pixelsByID);
+      } catch(e) {}
+      return [];
+    }
+
+    // ── Detect Google Ads conversion IDs ───────────────────────────────────
+    function getGoogleAdsIds() {
+      var ids = [];
+      try {
+        var tagData = window.google_tag_data;
+        if (tagData && tagData.ics && tagData.ics.entries) {
+          Object.keys(tagData.ics.entries).forEach(function(id) {
+            if (id.indexOf('AW-') === 0) ids.push(id);
+          });
+        }
+      } catch(e) {}
+      return ids;
+    }
+
+    var consent = getConsentStatus();
+    var tags    = getTagStatus();
+
+    var payload = {
+      // Visit info
+      timestamp: new Date().toISOString(),
+      url:       window.location.href,
+      domain:    window.location.hostname,
+      path:      window.location.pathname,
+      referrer:  document.referrer || null,
+      language:  navigator.language || null,
+
+      // Tag status (JavaScript layer — what Pixel Helper sees)
+      tags: tags,
+
+      // Tag IDs found
+      tagIds: {
+        metaPixelIds:    getMetaPixelIds(),
+        googleAdsIds:    getGoogleAdsIds(),
+      },
+
+      // Consent status
+      consent: consent,
+    };
+
+    // ── Send beacon ─────────────────────────────────────────────────────────
+    // sendBeacon is fire-and-forget, doesn't block page load
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(COLLECTOR_URL, JSON.stringify(payload));
+    } else {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', COLLECTOR_URL, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.send(JSON.stringify(payload));
+    }
+  } catch(e) {
+    // Silent fail — never break the page
+  }
+})();
+</script>
