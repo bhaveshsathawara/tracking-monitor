@@ -25,12 +25,12 @@ async function saveVisit(data) {
 /**
  * Read recent visitor logs and compute stats
  */
-// Convert UTC ISO string to IST (UTC+5:30)
+// Convert UTC ISO string to IST (UTC+5:30), with milliseconds
 function toIST(isoString) {
   if (!isoString) return '';
   const d = new Date(isoString);
   const ist = new Date(d.getTime() + 5.5 * 60 * 60 * 1000);
-  return ist.toISOString().slice(0, 19).replace('T', ' ') + ' IST';
+  return ist.toISOString().slice(0, 23).replace('T', ' ') + ' IST';
 }
 
 async function readVisitorStats(days = 7, requesterIp = '') {
@@ -80,7 +80,14 @@ async function readVisitorStats(days = 7, requesterIp = '') {
     else byDomain[d].consentUnknown++;
   }
 
-  const recentVisits = visits.slice(0, 200).map((v) => ({
+  // Sort newest-first before slicing so /visits shows the latest entries
+  visits.sort((a, b) => {
+    const ta = new Date(a.receivedAt || a.timestamp || 0).getTime();
+    const tb = new Date(b.receivedAt || b.timestamp || 0).getTime();
+    return tb - ta;
+  });
+
+  const recentVisits = visits.slice(0, 500).map((v) => ({
     ...v,
     timestampIST: toIST(v.receivedAt || v.timestamp),
     isYou: requesterIp && v.ip === requesterIp,
