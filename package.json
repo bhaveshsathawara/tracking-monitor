@@ -3,9 +3,12 @@
   "version": "3.0.0",
   "description": "Monitors GTM, Google Ads, and Meta Pixel across multiple domains with CMP detection, pre-consent analysis, sitemap auto-discovery, and email alerts",
   "scripts": {
-    "start":     "node scheduler.js",
-    "collector": "node collector.js",
-    "scan-once": "node index.js"
+    "start":      "node monitor.js",
+    "monitor":    "node monitor.js",
+    "scan-once":  "node monitor.js --once",
+    "scan-url":   "node monitor.js --url",
+    "collector":  "node collector.js",
+    "legacy":     "node scheduler.js"
   },
   "keywords": ["tracking", "gtm", "google-ads", "meta-pixel", "puppeteer", "monitoring", "cmp", "gdpr"],
   "license": "MIT",

@@ -252,4 +252,75 @@ async function tryAcceptConsent(page) {
   }
 }
 
-module.exports = { detectCMP, detectCMPFromRequests, tryAcceptConsent };
+/**
+ * Tries to click "Reject All" on whatever CMP is present.
+ * Tries platform-specific selectors first, then multilingual text fallback.
+ * Returns true if a button was successfully clicked.
+ */
+async function tryRejectConsent(page) {
+  // Platform-specific reject selectors
+  const selectors = [
+    '#onetrust-reject-all-handler',              // OneTrust
+    '.onetrust-close-btn-handler',
+    '#CybotCookiebotDialogBodyButtonDecline',    // Cookiebot
+    '.didomi-components-button--reject-all',     // Didomi
+    '[data-testid="didomi-reject-all"]',
+    '.axeptio_btn_rejectAll',                    // Axeptio
+    '[data-axeptio-button="rejectAll"]',
+    '.trustarc-decline-btn',                     // TrustArc
+    '#truste-consent-required',
+    '.cc-deny',                                  // Cookie Consent (Osano)
+    '#tarteaucitronAllDenied2',                  // Tarteaucitron
+    '#tarteaucitronAllDenied',
+    '.cky-btn-reject',                           // CookieYes
+    'button[data-gdpr-action="reject"]',
+    'button[data-consent-action="rejectAll"]',
+  ];
+
+  for (const sel of selectors) {
+    try {
+      const el = await page.$(sel);
+      if (el) {
+        await el.click();
+        return true;
+      }
+    } catch (_) {}
+  }
+
+  // Text-based fallback — multilingual reject phrases
+  const rejectTexts = [
+    // French
+    'tout refuser', 'refuser tout', 'refuser', 'je refuse', 'continuer sans accepter',
+    'continuer sans consentir', 'non merci',
+    // Spanish
+    'rechazar todo', 'rechazar todas', 'rechazar', 'no aceptar',
+    // Polish
+    'odrzuć wszystkie', 'odrzuć wszystko', 'odmawiam', 'nie zgadzam się',
+    // English
+    'reject all cookies', 'reject all', 'reject cookies', 'decline all', 'decline cookies',
+    'i decline', 'deny all', 'deny cookies',
+  ];
+
+  try {
+    const clicked = await page.evaluate((texts) => {
+      const candidates = [
+        ...document.querySelectorAll('button'),
+        ...document.querySelectorAll('a[role="button"]'),
+        ...document.querySelectorAll('[role="button"]'),
+      ];
+      for (const btn of candidates) {
+        const text = (btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase().trim();
+        if (texts.some((t) => text.includes(t))) {
+          btn.click();
+          return true;
+        }
+      }
+      return false;
+    }, rejectTexts);
+    return clicked;
+  } catch (_) {
+    return false;
+  }
+}
+
+module.exports = { detectCMP, detectCMPFromRequests, tryAcceptConsent, tryRejectConsent };
