@@ -157,13 +157,11 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
           <th style="width:170px">Time (IST)</th>
           <th style="width:90px">IP</th>
           <th>Domain / Path</th>
-          <th style="width:90px">Event</th>
-          <th style="width:70px">Consent</th>
-          <th style="width:40px" title="GTM">GTM</th>
-          <th style="width:40px" title="Meta Pixel">Meta</th>
-          <th style="width:40px" title="Google Ads">Ads</th>
-          <th style="width:40px" title="TikTok">TTK</th>
+          <th style="width:60px">Event</th>
+          <th style="width:120px">Consent</th>
+          <th>Tag Status</th>
           <th style="width:80px">Issues</th>
+          <th style="width:30px"></th>
         </tr>
       </thead>
       <tbody id="visit-tbody"></tbody>
@@ -228,6 +226,9 @@ function consentLabel(given) {
 }
 function tagDot(val) {
   return '<span class="dot ' + (val ? 'dot-green' : 'dot-red') + '"></span>';
+}
+function tagMini(label, val) {
+  return '<span style="display:inline-block;font-size:10px;padding:1px 6px;border-radius:3px;margin-right:3px;margin-bottom:2px;background:' + (val ? '#14532d' : '#450a0a') + ';color:' + (val ? '#86efac' : '#fca5a5') + ';font-weight:600">' + (val ? '✓' : '✗') + ' ' + label + '</span>';
 }
 
 /* ── Issue analysis ──────────────────────── */
@@ -406,22 +407,23 @@ function renderList() {
                   : '<span style="color:#22c55e;font-size:11px">✓ OK</span>';
     var ipDisplay = isYou ? '<span style="color:#22c55e;font-weight:700">' + (v.ip||'—') + ' 👈</span>' : '<span style="color:#64748b">' + (v.ip||'—') + '</span>';
     var fp = fullPath(v || {});
+    var consentCell = '<span style="color:' + consentColor(consent.given) + ';font-size:11px;font-weight:600">' + consentLabel(consent.given) + '</span>';
+    if (consent.vendor) consentCell += '<br><span style="color:#475569;font-size:10px">' + consent.vendor + '</span>';
+    var tagCell = tagMini('GTM', tags.gtmLoaded) + tagMini('Meta', tags.metaPixel) + tagMini('Ads', tags.googleAds) + tagMini('TTK', tags.tiktok);
 
-    html += '<tr data-idx="' + idx + '" class="' + (isYou ? 'you-row' : '') + (selectedIdx === idx ? ' selected' : '') + '" onclick="showDetail(' + idx + ')">';
-    html += '<td><code>' + ts + '</code></td>';
+    html += '<tr data-idx="' + idx + '" class="' + (isYou ? 'you-row' : '') + (selectedIdx === idx ? ' selected' : '') + '" onclick="showDetail(' + idx + ')" style="cursor:pointer">';
+    html += '<td><code style="font-size:10px">' + ts + '</code></td>';
     html += '<td>' + ipDisplay + '</td>';
     html += '<td><span style="color:#e2e8f0">' + (v&&v.domain||'—') + '</span><span style="color:#475569;margin-left:4px;font-family:monospace;font-size:11px" title="' + (v&&v.url||'') + '">' + fp + '</span></td>';
     html += '<td>' + eventBadge + '</td>';
-    html += '<td><span style="color:' + consentColor(consent.given) + ';font-size:11px">' + consentLabel(consent.given) + '</span></td>';
-    html += '<td style="text-align:center">' + tagDot(tags.gtmLoaded) + '</td>';
-    html += '<td style="text-align:center">' + tagDot(tags.metaPixel) + '</td>';
-    html += '<td style="text-align:center">' + tagDot(tags.googleAds) + '</td>';
-    html += '<td style="text-align:center">' + tagDot(tags.tiktok) + '</td>';
+    html += '<td style="line-height:1.6">' + consentCell + '</td>';
+    html += '<td style="line-height:1.8">' + tagCell + '</td>';
     html += '<td>' + issueBadge + '</td>';
+    html += '<td style="text-align:center"><button onclick="event.stopPropagation();showDetail(' + idx + ')" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:3px 7px;border-radius:4px;cursor:pointer;font-size:12px">→</button></td>';
     html += '</tr>';
   });
 
-  tbody.innerHTML = html || '<tr><td colspan="10" style="padding:40px;text-align:center;color:#475569">No visits match the current filter.</td></tr>';
+  tbody.innerHTML = html || '<tr><td colspan="8" style="padding:40px;text-align:center;color:#475569">No visits match the current filter.</td></tr>';
 
   // Update header stats
   document.getElementById('stat-total').textContent = allVisits.length;
@@ -475,48 +477,87 @@ function showDetail(idx) {
   /* Debug Timeline */
   html += '<div class="dp-section"><h3>Debug Timeline</h3>';
 
-  if (pv) {
-    var pvTags = pv.tags || {};
-    var pvTime = toIST(pv.receivedAt || pv.timestamp);
-    html += '<div class="tl-item"><div class="tl-dot tl-dot-blue"></div><div class="tl-content">';
-    html += '<div class="tl-time">' + pvTime + '</div>';
-    html += '<div class="tl-title">Page View · GTM fired "All Pages"</div>';
-    html += '<div class="tl-tags">';
-    html += tagBadge('GTM', pvTags.gtmLoaded, 'Loaded', 'Not loaded');
-    html += tagBadge('Meta Pixel', pvTags.metaPixel, 'Loaded', 'Not yet (expected)');
-    html += tagBadge('Google Ads', pvTags.googleAds, 'Loaded (restricted)', 'Not loaded');
-    html += tagBadge('TikTok', pvTags.tiktok, 'Loaded', 'Not yet (expected)');
-    html += '</div>';
-    html += '<div style="margin-top:6px;font-size:11px;color:' + consentColor(pv.consent&&pv.consent.given) + '">Consent at this moment: ' + consentLabel(pv.consent&&pv.consent.given) + (pv.consent&&pv.consent.vendor ? ' (' + pv.consent.vendor + ')' : '') + '</div>';
+  // Build ms-precision event list
+  var baseTs = pv ? new Date(pv.receivedAt || pv.timestamp || 0).getTime()
+                  : pc ? new Date(pc.receivedAt || pc.timestamp || 0).getTime() : 0;
+
+  function relMs(iso) {
+    if (!iso || !baseTs) return '—';
+    var d = new Date(iso).getTime() - baseTs;
+    return (d >= 0 ? '+' : '') + d.toLocaleString() + ' ms';
+  }
+  function msLabel(ms) {
+    if (ms === null || ms === undefined) return '';
+    return '<span style="font-family:monospace;font-size:11px;color:#94a3b8;min-width:80px;display:inline-block">T + ' + ms.toLocaleString() + ' ms</span>';
+  }
+
+  // Event: Page navigation start (if timing data from beacon)
+  if (pv && pv.timing && pv.timing.pageLoadMs !== undefined) {
+    html += '<div class="tl-item"><div class="tl-dot tl-dot-gray"></div><div class="tl-content">';
+    html += '<div class="tl-time">' + msLabel(0) + ' · Page navigation start</div>';
+    html += '<div style="font-size:11px;color:#475569;margin-top:2px">Browser began loading the page</div>';
     html += '</div></div>';
   }
 
+  // Event 1: Page View beacon
+  if (pv) {
+    var pvTags = pv.tags || {};
+    var pvTimeIST = toIST(pv.receivedAt || pv.timestamp);
+    var pvPageLoadMs = (pv.timing && pv.timing.pageLoadMs !== undefined) ? pv.timing.pageLoadMs : null;
+    html += '<div class="tl-item"><div class="tl-dot tl-dot-blue"></div><div class="tl-content">';
+    html += '<div class="tl-time">';
+    if (pvPageLoadMs !== null) {
+      html += msLabel(Math.round(pvPageLoadMs)) + ' · ';
+    } else {
+      html += '<span style="font-family:monospace;font-size:11px;color:#94a3b8;min-width:80px;display:inline-block">T + 0 ms</span> · ';
+    }
+    html += '<span style="color:#64748b;font-size:10px">' + pvTimeIST + '</span></div>';
+    html += '<div class="tl-title">📄 Page View — GTM fired "All Pages"</div>';
+    html += '<div class="tl-tags" style="margin-top:4px">';
+    html += tagBadge('GTM', pvTags.gtmLoaded, 'Loaded', 'Not loaded');
+    html += tagBadge('Meta', pvTags.metaPixel, 'Pre-loaded', 'Not yet (expected pre-consent)');
+    html += tagBadge('Ads', pvTags.googleAds, 'Restricted mode', 'Not loaded');
+    html += tagBadge('TikTok', pvTags.tiktok, 'Pre-loaded', 'Not yet (expected)');
+    html += '</div>';
+    html += '<div style="margin-top:5px;font-size:11px;color:' + consentColor(pv.consent&&pv.consent.given) + '">Consent snapshot: ' + consentLabel(pv.consent&&pv.consent.given) + (pv.consent&&pv.consent.vendor ? ' · <span style="color:#64748b">' + pv.consent.vendor + '</span>' : '') + '</div>';
+    html += '</div></div>';
+  }
+
+  // Event 2: Post-consent beacon (cmpEventLoadFinished)
   if (pc) {
     var pcTags = pc.tags || {};
-    var pcTime = toIST(pc.receivedAt || pc.timestamp);
-    var delay = pv ? '+' + timeDiffMs(pv.receivedAt||pv.timestamp, pc.receivedAt||pc.timestamp) + 'ms' : '';
+    var pcTimeIST = toIST(pc.receivedAt || pc.timestamp);
+    var serverDeltaMs = pv ? timeDiffMs(pv.receivedAt||pv.timestamp, pc.receivedAt||pc.timestamp) : 0;
+    var pcPageLoadMs = (pc.timing && pc.timing.pageLoadMs !== undefined) ? pc.timing.pageLoadMs : null;
     html += '<div class="tl-item"><div class="tl-dot tl-dot-green"></div><div class="tl-content">';
-    html += '<div class="tl-time">' + pcTime + (delay ? ' <span style="color:#64748b">(' + delay + ' after page view)</span>' : '') + '</div>';
-    html += '<div class="tl-title">cmpEventLoadFinished · Consent resolved</div>';
-    html += '<div class="tl-tags">';
-    html += tagBadge('Meta Pixel', pcTags.metaPixel, 'Fired ✅', 'Not fired ❌');
-    html += tagBadge('Google Ads', pcTags.googleAds, pc.consent&&pc.consent.given ? 'Full mode ✅' : 'Restricted mode', 'Not fired ❌');
+    html += '<div class="tl-time">';
+    if (pcPageLoadMs !== null) {
+      html += msLabel(Math.round(pcPageLoadMs)) + ' · ';
+    } else if (pv) {
+      html += '<span style="font-family:monospace;font-size:11px;color:#22c55e;min-width:80px;display:inline-block">+' + serverDeltaMs.toLocaleString() + ' ms</span> · ';
+    }
+    html += '<span style="color:#64748b;font-size:10px">' + pcTimeIST + '</span></div>';
+    html += '<div class="tl-title">🔔 cmpEventLoadFinished — Consent resolved</div>';
+    html += '<div class="tl-tags" style="margin-top:4px">';
+    html += tagBadge('Meta', pcTags.metaPixel, 'Fired ✅', 'Not fired ❌');
+    html += tagBadge('Ads', pcTags.googleAds, pc.consent&&pc.consent.given ? 'Full mode ✅' : 'Restricted mode (no consent)', 'Not fired ❌');
     html += tagBadge('TikTok', pcTags.tiktok, 'Fired ✅', 'Not fired ❌');
     html += '</div>';
-    html += '<div style="margin-top:6px;font-size:11px;color:' + consentColor(pc.consent&&pc.consent.given) + '">Consent: ' + consentLabel(pc.consent&&pc.consent.given) + (pc.consent&&pc.consent.vendor ? ' via ' + pc.consent.vendor : '') + '</div>';
+    html += '<div style="margin-top:5px;font-size:11px;color:' + consentColor(pc.consent&&pc.consent.given) + '"><strong>Consent decision: ' + consentLabel(pc.consent&&pc.consent.given) + '</strong>' + (pc.consent&&pc.consent.vendor ? ' · <span style="color:#64748b">' + pc.consent.vendor + '</span>' : '') + '</div>';
+    if (pv && serverDeltaMs > 0) {
+      html += '<div style="margin-top:3px;font-size:10px;color:#475569">Server received this beacon <strong style="color:#94a3b8">' + serverDeltaMs.toLocaleString() + ' ms</strong> after the page-view beacon</div>';
+    }
     if (pc.tagIds) {
-      if (pc.tagIds.meta && pc.tagIds.meta.length) {
-        html += '<div style="margin-top:4px;font-size:11px;color:#64748b">Meta Pixel IDs: <code>' + pc.tagIds.meta.join(', ') + '</code></div>';
-      }
-      if (pc.tagIds.googleAds && pc.tagIds.googleAds.length) {
-        html += '<div style="margin-top:2px;font-size:11px;color:#64748b">Google Ads IDs: <code>' + pc.tagIds.googleAds.join(', ') + '</code></div>';
-      }
+      if (pc.tagIds.meta && pc.tagIds.meta.length)
+        html += '<div style="margin-top:3px;font-size:11px;color:#64748b">Meta IDs: <code>' + pc.tagIds.meta.join(', ') + '</code></div>';
+      if (pc.tagIds.googleAds && pc.tagIds.googleAds.length)
+        html += '<div style="margin-top:2px;font-size:11px;color:#64748b">Ads IDs: <code>' + pc.tagIds.googleAds.join(', ') + '</code></div>';
     }
     html += '</div></div>';
   } else {
     html += '<div class="tl-item"><div class="tl-dot tl-dot-gray"></div><div class="tl-content">';
-    html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — second beacon not paired</div>';
-    html += '<div style="font-size:11px;color:#f59e0b;margin-top:4px">⚠ If you already added cmpEventLoadFinished trigger: the GTM script needs updating — it must detect <code>{{Event}}</code> and send <code>eventType: "post-consent"</code> so the two beacons can be matched.</div>';
+    html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — not received yet</div>';
+    html += '<div style="font-size:11px;color:#f59e0b;margin-top:4px">Either a new visitor (no consent cookie so banner is still showing), or the GTM monitoring tag needs the cmpEventLoadFinished trigger added.</div>';
     html += '</div></div>';
   }
   html += '</div>'; // dp-section timeline
@@ -575,7 +616,19 @@ function showDetail(idx) {
     s += '<div style="margin:8px 0 4px;font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.5px">Consent</div>';
     s += row_(null, 'vendor', c.vendor || '<span style="color:#475569">—</span>');
     s += row_(null, 'given', c.given === true ? '<span style="color:#22c55e">✅ true</span>' : c.given === false ? '<span style="color:#f87171">❌ false</span>' : '<span style="color:#64748b">— unknown</span>');
+    // timing (if available from updated GTM script)
+    if (b.timing && b.timing.pageLoadMs !== undefined) {
+      s += '<div style="margin:8px 0 4px;font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.5px">Timing</div>';
+      s += row_(null, 'pageLoadMs', '<code>' + Math.round(b.timing.pageLoadMs) + ' ms</code> <span style="color:#475569;font-size:10px">after page navigation start</span>');
+    }
     s += '</div>';
+    // dataLayer pageView event (if captured by updated GTM script)
+    if (b.dataLayerPayload) {
+      s += '<div class="dp-section"><h3>dataLayer pageView Payload</h3>';
+      s += '<div style="font-size:11px;color:#64748b;margin-bottom:8px">Event pushed to GTM dataLayer by the website (event: \\'pageView\\')</div>';
+      s += '<pre style="display:block">' + JSON.stringify(b.dataLayerPayload, null, 2) + '</pre>';
+      s += '</div>';
+    }
     return s;
   }
   html += beaconFields(pv, 'Page View Beacon');
@@ -660,14 +713,14 @@ function startCountdown() {
     if (refreshCountdown <= 0) {
       clearInterval(refreshTimer);
       refreshTimer = null;
-      reload();
+      reload(true); // silent — no overlay flicker
     }
   }, 1000);
 }
 
 /* ── Load data ──────────────────────────── */
-function reload() {
-  document.getElementById('loading').style.display = 'flex';
+function reload(silent) {
+  if (!silent) document.getElementById('loading').style.display = 'flex';
   fetch('/stats')
     .then(function(r) { return r.json(); })
     .then(function(data) {
@@ -679,11 +732,11 @@ function reload() {
         'Last updated: ' + toIST(now.toISOString()) + '<br>Your IP: <code style="color:#22c55e">' + yourIp + '</code>';
       renderDomainCards();
       renderList();
-      document.getElementById('loading').style.display = 'none';
+      if (!silent) document.getElementById('loading').style.display = 'none';
       startCountdown();
     })
     .catch(function(e) {
-      document.getElementById('loading').innerHTML = 'Error loading data: ' + e.message;
+      if (!silent) document.getElementById('loading').innerHTML = 'Error loading data: ' + e.message;
     });
 }
 
