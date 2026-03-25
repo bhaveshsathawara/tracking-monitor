@@ -244,6 +244,14 @@ function analyzeIssues(pv, pc) {
   var consent = (pc && pc.consent) || (pv && pv.consent) || {};
   var given = consent.given;
 
+  // No page-view beacon (only post-consent arrived)
+  if (!pv && pc) {
+    issues.push({ level: 'warning', tag: 'Page View',
+      message: 'Page view beacon was not received — only post-consent beacon paired',
+      rootCause: 'Most likely cause: consentmanager is lazy-loading GTM (class="cmplazyload" on the GTM script tag). This means GTM only initialises AFTER consent is resolved. The "All Pages" trigger fires at the same moment as cmpEventLoadFinished, and the page-view beacon either lost the race or failed (sendBeacon blocked by an ad-blocker). Less likely: the Tracking Health Monitor tag is missing the "All Pages" trigger.',
+      fix: 'In GTM → Tracking Health Monitor tag → confirm two triggers are set: (1) All Pages  (2) cmpEventLoadFinished. If consentmanager controls GTM loading, both beacons will arrive within milliseconds of each other — this is expected and the dashboard handles it.' });
+  }
+
   // GTM not loaded
   if (pv && !pvTags.gtmLoaded) {
     issues.push({ level: 'critical', tag: 'GTM',
@@ -256,15 +264,15 @@ function analyzeIssues(pv, pc) {
   if (!pc) {
     issues.push({ level: 'info', tag: 'CMP',
       message: 'No post-consent beacon received',
-      rootCause: 'Either (1) new visitor with no prior consent cookie, or (2) the GTM script still uses the old version which does not set eventType — both beacons look identical so they cannot be paired.',
-      fix: 'Update the Tracking Health Monitor GTM script to the latest version (detects {{Event}} variable and sends eventType: post-consent on cmpEventLoadFinished).' });
+      rootCause: 'New visitor whose consent banner is still open. The post-consent beacon arrives once they accept or decline. If this is a repeat visitor, check GTM → Tracking Health Monitor → confirm cmpEventLoadFinished trigger is present.',
+      fix: 'Wait for the visitor to interact with the consent banner. If never arriving for repeat visitors, update GTM script to latest version.' });
   } else {
     // Meta Pixel
     if (given === true && !pcTags.metaPixel) {
       issues.push({ level: 'error', tag: 'Meta Pixel',
         message: 'Meta Pixel did not fire after consent accepted',
-        rootCause: 'Meta_Pageview tag is missing the cmpEventLoadFinished trigger, has wrong pixel ID, or a JS error is preventing it from loading.',
-        fix: 'GTM → Meta_Pageview → verify trigger = cmpEventLoadFinished. Check Meta Business Manager for correct pixel ID.' });
+        rootCause: 'Most likely: RACE CONDITION — consentmanager lazy-loads GTM, so Meta_Pageview and the monitoring tag both fire on cmpEventLoadFinished at the same time. The monitoring script captures window.fbq BEFORE Meta_Pageview tag has executed. Fix: update GTM script to use 800ms delay for post-consent tag capture. Less likely: missing cmpEventLoadFinished trigger on Meta_Pageview, or wrong pixel ID.',
+        fix: 'Update Tracking Health Monitor GTM script to latest version (adds 800ms setTimeout before capturing tag status on post-consent beacon). This is the most common cause when pixel ID and trigger are confirmed correct.' });
     } else if (given === false && pcTags.metaPixel) {
       issues.push({ level: 'critical', tag: 'Meta Pixel',
         message: '🚨 GDPR VIOLATION: Meta Pixel fired after consent was REFUSED',
@@ -483,7 +491,8 @@ function showDetail(idx) {
   html += '<div class="dp-tabs">';
   html += '<button class="dp-tab active" data-tab="timeline" onclick="switchTab(\\'timeline\\')">Timeline</button>';
   html += '<button class="dp-tab" data-tab="issues" onclick="switchTab(\\'issues\\')">Issues' + (errorCount > 0 ? ' <span style="color:#f87171;font-size:10px">● ' + errorCount + '</span>' : '') + '</button>';
-  html += '<button class="dp-tab" data-tab="pageview" onclick="switchTab(\\'pageview\\')">Pageview Data</button>';
+  html += '<button class="dp-tab" data-tab="pageview" onclick="switchTab(\\'pageview\\')">Payload</button>';
+  html += '<button class="dp-tab" data-tab="datalayer" onclick="switchTab(\\'datalayer\\')">DataLayer</button>';
   html += '<button class="dp-tab" data-tab="raw" onclick="switchTab(\\'raw\\')">Raw JSON</button>';
   html += '</div>';
 
@@ -617,7 +626,12 @@ function showDetail(idx) {
   /* ── Tab: Pageview Data ── */
   html += '<div id="dp-tab-pageview" style="display:none">';
   function beaconFields(b, title) {
-    if (!b) return '<div class="dp-section" style="color:#475569">' + title + ' — not received</div>';
+    if (!b) {
+      var notReceivedMsg = title === 'Page View Beacon'
+        ? '<div class="dp-section"><div style="color:#f59e0b;font-weight:600;margin-bottom:8px">⚠ ' + title + ' — not received</div><div style="font-size:12px;color:#94a3b8;line-height:1.6"><strong>Why does this happen?</strong><br>consentmanager lazy-loads GTM (the <code>cmplazyload</code> class on your GTM script tag). GTM only initialises after consent is resolved. This means the "All Pages" trigger and <code>cmpEventLoadFinished</code> both fire within milliseconds of each other. The page-view beacon either:<br>• Arrived at the server after the post-consent beacon (out-of-order network delivery)<br>• Was blocked by an ad-blocker (sendBeacon call failed)<br>• The monitoring tag is missing the "All Pages" trigger<br><br><strong>Action:</strong> Go to GTM → Tracking Health Monitor → verify both triggers exist: <strong>All Pages</strong> + <strong>cmpEventLoadFinished</strong>.</div></div>'
+        : '<div class="dp-section" style="color:#475569">' + title + ' — not received</div>';
+      return notReceivedMsg;
+    }
     var t = b.tags || {};
     var ids = b.tagIds || {};
     var c = b.consent || {};
@@ -677,6 +691,42 @@ function showDetail(idx) {
   html += '</div>';
   html += '</div>'; // dp-tab-raw
 
+  /* ── Tab: DataLayer ── */
+  html += '<div id="dp-tab-datalayer" style="display:none">';
+  var dlSnap = (pv && pv.dataLayerSnapshot) || (pc && pc.dataLayerSnapshot);
+  if (dlSnap && dlSnap.length) {
+    html += '<div class="dp-section"><h3>window.dataLayer Snapshot</h3>';
+    html += '<div style="font-size:11px;color:#64748b;margin-bottom:10px">' + dlSnap.length + ' entries captured at time of beacon · click any row to expand</div>';
+    dlSnap.forEach(function(entry, i) {
+      var ev = entry.event || '';
+      var isPageView = ev === 'pageView' || ev === 'page_view' || ev === 'virtualPageview';
+      var isConsent  = ev.toLowerCase().indexOf('consent') >= 0 || ev.toLowerCase().indexOf('cmp') >= 0;
+      var isGtm      = ev.indexOf('gtm.') === 0;
+      var rowBg = isPageView ? '#052e16' : isConsent ? '#0c1a30' : isGtm ? '#1a1a2e' : '#0f172a';
+      var evColor = isPageView ? '#86efac' : isConsent ? '#93c5fd' : isGtm ? '#a78bfa' : '#94a3b8';
+      var rowId = 'dl-row-' + i;
+      html += '<div style="border:1px solid #1e293b;border-radius:4px;margin-bottom:4px;overflow:hidden">';
+      html += '<div style="background:' + rowBg + ';padding:6px 10px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="var el=document.getElementById(\\'' + rowId + '\\');el.style.display=el.style.display===\\'none\\'?\\'block\\':\\'none\\'">';
+      html += '<span style="font-family:monospace;font-size:10px;color:#475569;width:24px;flex-shrink:0">[' + i + ']</span>';
+      html += '<span style="font-size:11px;font-weight:600;color:' + evColor + '">' + (ev || '<span style="color:#475569">no event</span>') + '</span>';
+      var keys = Object.keys(entry).filter(function(k){ return k !== 'event'; });
+      if (keys.length) html += '<span style="font-size:10px;color:#475569;margin-left:auto">' + keys.slice(0,3).join(', ') + (keys.length > 3 ? ' +' + (keys.length-3) : '') + '</span>';
+      html += '</div>';
+      html += '<pre id="' + rowId + '" style="display:none;margin:0;border:none;border-top:1px solid #1e293b;border-radius:0">' + JSON.stringify(entry, null, 2) + '</pre>';
+      html += '</div>';
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="dp-section"><h3>window.dataLayer Snapshot</h3>';
+    html += '<div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:16px;font-size:12px;color:#94a3b8">';
+    html += '<div style="font-weight:600;margin-bottom:8px;color:#f1f5f9">No dataLayer snapshot captured yet</div>';
+    html += '<div style="margin-bottom:4px">Update the <strong>Tracking Health Monitor</strong> GTM tag with the latest script.</div>';
+    html += '<div>The new script captures <code>window.dataLayer</code> at the time each beacon fires and sends it as <code>dataLayerSnapshot</code>.</div>';
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div>'; // dp-tab-datalayer
+
   document.getElementById('detail-content').innerHTML = html;
   document.getElementById('detail-pane').style.display = 'block';
 }
@@ -718,7 +768,7 @@ document.getElementById('search').addEventListener('input', function() {
 
 /* ── Tab switching ──────────────────────── */
 function switchTab(tab) {
-  var tabs = ['timeline', 'issues', 'pageview', 'raw'];
+  var tabs = ['timeline', 'issues', 'pageview', 'datalayer', 'raw'];
   tabs.forEach(function(t) {
     var el = document.getElementById('dp-tab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
