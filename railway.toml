@@ -1,3 +1,12 @@
+# ── Service: tracking-collector ───────────────────────────────────────────────
+# Receives GTM visitor beacons from real users.
+# Deploy this as Service 1 in Railway (no Docker needed).
+#
+# Service 2 (tracking-monitor, Puppeteer scanner) uses Dockerfile.monitor
+# Set it up separately in Railway dashboard with:
+#   Dockerfile Path: Dockerfile.monitor
+#   Start Command:   (leave blank — CMD in Dockerfile handles it)
+
 [build]
 builder = "nixpacks"
 
@@ -5,6 +14,3 @@ builder = "nixpacks"
 startCommand = "node collector.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-[[services]]
-name = "tracking-collector"
