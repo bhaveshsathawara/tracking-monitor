@@ -63,9 +63,9 @@ async function readVisitorStats(days = 7) {
     }
 
     byDomain[d].visits++;
-    if (v.tags?.gtm)       byDomain[d].gtmLoaded++;
-    if (v.tags?.meta)      byDomain[d].metaLoaded++;
-    if (v.tags?.googleAds) byDomain[d].adsLoaded++;
+    if (v.tags?.gtmLoaded)  byDomain[d].gtmLoaded++;
+    if (v.tags?.metaPixel)  byDomain[d].metaLoaded++;
+    if (v.tags?.googleAds)  byDomain[d].adsLoaded++;
 
     if (v.consent?.given === true) byDomain[d].consentGiven++;
     else if (v.consent?.given === false) byDomain[d].consentDenied++;
