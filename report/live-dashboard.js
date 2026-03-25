@@ -9,7 +9,8 @@ function getDashboardHtml() {
 <title>Tracking Monitor — Live</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#020617;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;height:100vh;display:flex;flex-direction:column}
+html{overflow-x:hidden}
+body{background:#020617;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
 a{color:inherit;text-decoration:none}
 code{font-family:'SF Mono','Fira Code',monospace;font-size:11px}
 
@@ -21,7 +22,7 @@ code{font-family:'SF Mono','Fira Code',monospace;font-size:11px}
 #filters{background:#0f172a;border-bottom:1px solid #1e293b;padding:8px 20px;display:flex;gap:10px;align-items:center;flex-shrink:0;flex-wrap:wrap}
 #main{display:flex;flex:1;overflow:hidden}
 #list-pane{flex:1;overflow-y:auto;min-width:0}
-#detail-pane{width:520px;background:#0f172a;border-left:1px solid #1e293b;overflow-y:auto;display:none;flex-shrink:0}
+#detail-pane{width:420px;background:#0f172a;border-left:1px solid #1e293b;overflow-y:auto;display:none;flex-shrink:0}
 
 /* Domain cards */
 .dcard{background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 14px;cursor:pointer;white-space:nowrap}
@@ -37,13 +38,17 @@ code{font-family:'SF Mono','Fira Code',monospace;font-size:11px}
 #search:focus{border-color:#3b82f6}
 
 /* Table */
-table{width:100%;border-collapse:collapse}
-thead th{position:sticky;top:0;background:#020617;padding:8px 10px;text-align:left;color:#475569;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #1e293b;z-index:10;white-space:nowrap}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+thead th{position:sticky;top:0;background:#020617;padding:6px 8px;text-align:left;color:#475569;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #1e293b;z-index:10;white-space:nowrap;overflow:hidden}
 tbody tr{border-bottom:1px solid #0f172a;cursor:pointer;transition:background .1s}
 tbody tr:hover{background:#0f172a}
 tbody tr.selected{background:#1e3a5f}
 tbody tr.you-row{border-left:3px solid #22c55e}
-td{padding:8px 10px;vertical-align:middle}
+td{padding:6px 8px;vertical-align:middle;overflow:hidden}
+.cell-ts{white-space:nowrap;font-family:'SF Mono','Fira Code',monospace;font-size:10px}
+.cell-ip{font-family:'SF Mono','Fira Code',monospace;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell-path{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cell-tags{white-space:normal;line-height:1.8}
 
 /* Badges */
 .badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;border:1px solid;white-space:nowrap}
@@ -154,14 +159,14 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
     <table>
       <thead>
         <tr>
-          <th style="width:170px">Time (IST)</th>
-          <th style="width:90px">IP</th>
-          <th>Domain / Path</th>
-          <th style="width:60px">Event</th>
-          <th style="width:120px">Consent</th>
-          <th>Tag Status</th>
-          <th style="width:80px">Issues</th>
-          <th style="width:30px"></th>
+          <th style="width:148px">Time (IST)</th>
+          <th style="width:88px">IP</th>
+          <th style="min-width:0">Domain / Path</th>
+          <th style="width:52px">Event</th>
+          <th style="width:108px">Consent</th>
+          <th style="width:170px">Tag Status</th>
+          <th style="width:72px">Issues</th>
+          <th style="width:28px"></th>
         </tr>
       </thead>
       <tbody id="visit-tbody"></tbody>
@@ -299,45 +304,65 @@ function analyzeIssues(pv, pc) {
 
 /* ── Group page-view + post-consent pairs ── */
 function groupVisits(visits) {
-  var sorted = visits.slice().sort(function(a, b) {
-    return new Date(a.receivedAt || a.timestamp || 0) - new Date(b.receivedAt || b.timestamp || 0);
+  // Split into typed buckets
+  var pvs = [], pcs = [], legacy = [];
+  visits.forEach(function(v) {
+    if (v.eventType === 'post-consent') pcs.push(v);
+    else if (v.eventType === 'page-view') pvs.push(v);
+    else legacy.push(v); // old GTM script — no eventType field
   });
+
   var groups = [];
-  var used = {};
+  var usedPc  = {};
+  var usedLeg = {};
 
-  for (var i = 0; i < sorted.length; i++) {
-    if (used[i]) continue;
-    var v = sorted[i];
-    var group = { pageView: null, postConsent: null };
+  // Match explicit page-views → post-consents by absolute time diff.
+  // This handles the case where cmpEventLoadFinished fires quickly and
+  // the post-consent beacon arrives at the server BEFORE the page-view beacon.
+  pvs.forEach(function(pv) {
+    var pvTime = new Date(pv.receivedAt || pv.timestamp || 0).getTime();
+    var bestIdx = -1, bestDiff = Infinity;
+    pcs.forEach(function(pc, ci) {
+      if (usedPc[ci]) return;
+      if (pc.ip !== pv.ip || pc.domain !== pv.domain || pc.path !== pv.path) return;
+      var diff = Math.abs(new Date(pc.receivedAt || pc.timestamp || 0).getTime() - pvTime);
+      if (diff < 300000 && diff < bestDiff) { bestDiff = diff; bestIdx = ci; }
+    });
+    var g = { pageView: pv, postConsent: null };
+    if (bestIdx >= 0) { g.postConsent = pcs[bestIdx]; usedPc[bestIdx] = true; }
+    groups.push(g);
+  });
 
-    // Explicit post-consent beacon with no matching page-view
-    if (v.eventType === 'post-consent') {
-      group.postConsent = v;
-      used[i] = true;
-      groups.push(group);
-      continue;
-    }
+  // Orphaned post-consents (arrived with no matching page-view)
+  pcs.forEach(function(pc, ci) {
+    if (!usedPc[ci]) groups.push({ pageView: null, postConsent: pc });
+  });
 
-    group.pageView = v;
-
-    // Look for a second beacon from the same session (same IP+domain+path within 3 min).
-    // Accept regardless of eventType — old GTM script doesn't set it.
-    // Prefer explicit 'post-consent', otherwise take any second beacon that arrived later.
-    for (var j = i + 1; j < sorted.length; j++) {
-      if (used[j]) continue;
-      var v2 = sorted[j];
+  // Legacy beacons (old GTM script, no eventType): pair sequentially by time
+  legacy.sort(function(a, b) {
+    return new Date(a.receivedAt||a.timestamp||0) - new Date(b.receivedAt||b.timestamp||0);
+  });
+  for (var i = 0; i < legacy.length; i++) {
+    if (usedLeg[i]) continue;
+    var v = legacy[i];
+    var vTime = new Date(v.receivedAt || v.timestamp || 0).getTime();
+    var g2 = { pageView: v, postConsent: null };
+    usedLeg[i] = true;
+    for (var j = i + 1; j < legacy.length; j++) {
+      if (usedLeg[j]) continue;
+      var v2 = legacy[j];
       if (v2.ip !== v.ip || v2.domain !== v.domain || v2.path !== v.path) continue;
-      var diff = new Date(v2.receivedAt || 0) - new Date(v.receivedAt || 0);
-      if (diff <= 0 || diff > 180000) continue;
-      group.postConsent = v2;
-      used[j] = true;
-      break;
+      var d = new Date(v2.receivedAt || v2.timestamp || 0).getTime() - vTime;
+      if (d > 0 && d < 300000) { g2.postConsent = v2; usedLeg[j] = true; break; }
     }
-
-    used[i] = true;
-    groups.push(group);
+    groups.push(g2);
   }
-  return groups.reverse(); // newest first
+
+  return groups.sort(function(a, b) {
+    var va = a.pageView || a.postConsent;
+    var vb = b.pageView || b.postConsent;
+    return new Date(vb.receivedAt||vb.timestamp||0) - new Date(va.receivedAt||va.timestamp||0);
+  });
 }
 
 /* ── Render domain cards ─────────────────── */
@@ -411,15 +436,17 @@ function renderList() {
     if (consent.vendor) consentCell += '<br><span style="color:#475569;font-size:10px">' + consent.vendor + '</span>';
     var tagCell = tagMini('GTM', tags.gtmLoaded) + tagMini('Meta', tags.metaPixel) + tagMini('Ads', tags.googleAds) + tagMini('TTK', tags.tiktok);
 
+    // Short timestamp: strip year → "03-26 10:15:32.543"
+    var tsShort = ts.length > 10 ? ts.slice(5, 23) : ts;
     html += '<tr data-idx="' + idx + '" class="' + (isYou ? 'you-row' : '') + (selectedIdx === idx ? ' selected' : '') + '" onclick="showDetail(' + idx + ')" style="cursor:pointer">';
-    html += '<td><code style="font-size:10px">' + ts + '</code></td>';
-    html += '<td>' + ipDisplay + '</td>';
-    html += '<td><span style="color:#e2e8f0">' + (v&&v.domain||'—') + '</span><span style="color:#475569;margin-left:4px;font-family:monospace;font-size:11px" title="' + (v&&v.url||'') + '">' + fp + '</span></td>';
+    html += '<td class="cell-ts" title="' + ts + '">' + tsShort + '</td>';
+    html += '<td class="cell-ip">' + ipDisplay + '</td>';
+    html += '<td class="cell-path"><span style="color:#e2e8f0;font-size:12px">' + (v&&v.domain||'—') + '</span><span style="color:#475569;margin-left:3px;font-family:monospace;font-size:10px" title="' + (v&&v.url||'') + '">' + fp + '</span></td>';
     html += '<td>' + eventBadge + '</td>';
     html += '<td style="line-height:1.6">' + consentCell + '</td>';
-    html += '<td style="line-height:1.8">' + tagCell + '</td>';
+    html += '<td class="cell-tags">' + tagCell + '</td>';
     html += '<td>' + issueBadge + '</td>';
-    html += '<td style="text-align:center"><button onclick="event.stopPropagation();showDetail(' + idx + ')" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:3px 7px;border-radius:4px;cursor:pointer;font-size:12px">→</button></td>';
+    html += '<td style="text-align:center"><button onclick="event.stopPropagation();showDetail(' + idx + ')" style="background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:2px 6px;border-radius:4px;cursor:pointer;font-size:11px">→</button></td>';
     html += '</tr>';
   });
 
@@ -556,8 +583,9 @@ function showDetail(idx) {
     html += '</div></div>';
   } else {
     html += '<div class="tl-item"><div class="tl-dot tl-dot-gray"></div><div class="tl-content">';
-    html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — not received yet</div>';
-    html += '<div style="font-size:11px;color:#f59e0b;margin-top:4px">Either a new visitor (no consent cookie so banner is still showing), or the GTM monitoring tag needs the cmpEventLoadFinished trigger added.</div>';
+    html += '<div class="tl-title" style="color:#475569">cmpEventLoadFinished — second beacon not paired</div>';
+    html += '<div style="font-size:11px;color:#64748b;margin-top:4px">Most likely: new visitor whose consent banner is still open (no prior consent cookie). The post-consent beacon will arrive once they accept/decline.</div>';
+    html += '<div style="font-size:11px;color:#64748b;margin-top:3px">Less likely: if this is a repeat visitor, the server may have received the beacons out of order. The pairing window is 5 minutes.</div>';
     html += '</div></div>';
   }
   html += '</div>'; // dp-section timeline
