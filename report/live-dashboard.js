@@ -223,6 +223,21 @@ function isMyVisit(v) {
   return false;
 }
 
+// Compute "given" from purpose-level data when available (more accurate than purposeConsents[1] alone)
+function computeGiven(consent) {
+  if (!consent) return null;
+  var purposes = consent.purposeConsents;
+  if (purposes) {
+    var keys = Object.keys(purposes);
+    if (keys.length > 0) {
+      for (var i = 0; i < keys.length; i++) {
+        if (purposes[keys[i]] === true) return true;
+      }
+      return false; // all purposes explicitly denied
+    }
+  }
+  return consent.given !== undefined ? consent.given : null;
+}
 function consentColor(given) {
   if (given === true)  return '#22c55e';
   if (given === false) return '#f87171';
@@ -246,7 +261,7 @@ function analyzeIssues(pv, pc) {
   var pvTags = (pv && pv.tags) || {};
   var pcTags = (pc && pc.tags) || {};
   var consent = (pc && pc.consent) || (pv && pv.consent) || {};
-  var given = consent.given;
+  var given = computeGiven(consent);
 
   // No page-view beacon (only post-consent arrived)
   if (!pv && pc) {
@@ -446,7 +461,8 @@ function renderList() {
                   : '<span style="color:#22c55e;font-size:11px">✓ OK</span>';
     var ipDisplay = isYou ? '<span style="color:#22c55e;font-weight:700">' + (v.ip||'—') + ' 👈</span>' : '<span style="color:#64748b">' + (v.ip||'—') + '</span>';
     var fp = fullPath(v || {});
-    var consentCell = '<span style="color:' + consentColor(consent.given) + ';font-size:11px;font-weight:600">' + consentLabel(consent.given) + '</span>';
+    var consentGiven = computeGiven(consent);
+    var consentCell = '<span style="color:' + consentColor(consentGiven) + ';font-size:11px;font-weight:600">' + consentLabel(consentGiven) + '</span>';
     if (consent.vendor) consentCell += '<br><span style="color:#475569;font-size:10px">' + consent.vendor + '</span>';
     var tagCell = tagMini('GTM', tags.gtmLoaded) + tagMini('Meta', tags.metaPixel) + tagMini('Ads', tags.googleAds) + tagMini('TTK', tags.tiktok);
 
@@ -562,7 +578,7 @@ function showDetail(idx) {
     html += tagBadge('Ads', pvTags.googleAds, 'Restricted mode', 'Not loaded');
     html += tagBadge('TikTok', pvTags.tiktok, 'Pre-loaded', 'Not yet (expected)');
     html += '</div>';
-    html += '<div style="margin-top:5px;font-size:11px;color:' + consentColor(pv.consent&&pv.consent.given) + '">Consent snapshot: ' + consentLabel(pv.consent&&pv.consent.given) + (pv.consent&&pv.consent.vendor ? ' · <span style="color:#64748b">' + pv.consent.vendor + '</span>' : '') + '</div>';
+    html += '<div style="margin-top:5px;font-size:11px;color:' + consentColor(computeGiven(pv.consent)) + '">Consent snapshot: ' + consentLabel(computeGiven(pv.consent)) + (pv.consent&&pv.consent.vendor ? ' · <span style="color:#64748b">' + pv.consent.vendor + '</span>' : '') + '</div>';
     html += '</div></div>';
   }
 
@@ -583,10 +599,11 @@ function showDetail(idx) {
     html += '<div class="tl-title">🔔 cmpEventLoadFinished — Consent resolved</div>';
     html += '<div class="tl-tags" style="margin-top:4px">';
     html += tagBadge('Meta', pcTags.metaPixel, 'Fired ✅', 'Not fired ❌');
-    html += tagBadge('Ads', pcTags.googleAds, pc.consent&&pc.consent.given ? 'Full mode ✅' : 'Restricted mode (no consent)', 'Not fired ❌');
+    html += tagBadge('Ads', pcTags.googleAds, computeGiven(pc.consent) ? 'Full mode ✅' : 'Restricted mode (no consent)', 'Not fired ❌');
     html += tagBadge('TikTok', pcTags.tiktok, 'Fired ✅', 'Not fired ❌');
     html += '</div>';
-    html += '<div style="margin-top:5px;font-size:11px;color:' + consentColor(pc.consent&&pc.consent.given) + '"><strong>Consent decision: ' + consentLabel(pc.consent&&pc.consent.given) + '</strong>' + (pc.consent&&pc.consent.vendor ? ' · <span style="color:#64748b">' + pc.consent.vendor + '</span>' : '') + '</div>';
+    var pcGiven = computeGiven(pc.consent);
+    html += '<div style="margin-top:5px;font-size:11px;color:' + consentColor(pcGiven) + '"><strong>Consent decision: ' + consentLabel(pcGiven) + '</strong>' + (pc.consent&&pc.consent.vendor ? ' · <span style="color:#64748b">' + pc.consent.vendor + '</span>' : '') + '</div>';
     if (pv && serverDeltaMs > 0) {
       html += '<div style="margin-top:3px;font-size:10px;color:#475569">Server received this beacon <strong style="color:#94a3b8">' + serverDeltaMs.toLocaleString() + ' ms</strong> after the page-view beacon</div>';
     }
@@ -653,14 +670,14 @@ function showDetail(idx) {
     '10': 'Develop and improve products'
   };
 
-  var finalConsent = pcConsent.given !== undefined ? pcConsent.given : pvConsent.given;
+  var finalConsent = computeGiven(pcConsent) !== null ? computeGiven(pcConsent) : computeGiven(pvConsent);
 
   // Summary
   html += '<div class="dp-section"><h3>Consent Summary</h3>';
   html += row_(null, 'CMP Vendor',      (pcConsent.vendor || pvConsent.vendor || '<span style="color:#475569">—</span>'));
   html += row_(null, 'Final Decision',  '<span style="color:' + consentColor(finalConsent) + ';font-weight:700;font-size:13px">' + consentLabel(finalConsent) + '</span>');
-  html += row_(null, 'Page View Snapshot', '<span style="color:' + consentColor(pvConsent.given) + '">' + consentLabel(pvConsent.given) + '</span>');
-  html += row_(null, 'Post-Consent Snapshot', pc ? '<span style="color:' + consentColor(pcConsent.given) + '">' + consentLabel(pcConsent.given) + '</span>' : '<span style="color:#475569">— not received yet</span>');
+  html += row_(null, 'Page View Snapshot', '<span style="color:' + consentColor(computeGiven(pvConsent)) + '">' + consentLabel(computeGiven(pvConsent)) + '</span>');
+  html += row_(null, 'Post-Consent Snapshot', pc ? '<span style="color:' + consentColor(computeGiven(pcConsent)) + '">' + consentLabel(computeGiven(pcConsent)) + '</span>' : '<span style="color:#475569">— not received yet</span>');
   var consentExists = pcConsent.consentExists !== undefined ? pcConsent.consentExists : pvConsent.consentExists;
   html += row_(null, 'Consent Cookie Exists',
     consentExists === true  ? '<span style="color:#22c55e">✅ Yes — returning visitor</span>' :
