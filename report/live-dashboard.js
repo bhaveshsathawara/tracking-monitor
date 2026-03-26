@@ -148,7 +148,7 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
   <button class="filter-btn" data-filter="issues">Issues only</button>
   <button class="filter-btn" data-filter="you">My visits</button>
   <span style="color:#475569;font-size:11px">Dashboard IP: <code id="your-ip-display" style="color:#22c55e">—</code></span>
-  <input id="myip-input" type="text" placeholder="+ fr.igraal.com IP if different" title="If your IP when browsing fr.igraal.com differs from your dashboard IP, enter it here. Both IPs are searched." style="width:170px">
+  <input id="myip-input" type="text" placeholder="fr.igraal.com IP if different" title="If your browsing IP differs from your dashboard IP, enter it here. Both IPs are searched." style="width:170px">
   <input id="search" type="text" placeholder="Search domain / path / IP…">
   <button class="filter-btn" onclick="reload()" style="margin-left:auto">↻ Refresh</button>
   <span id="countdown-display" style="color:#475569;font-size:11px">Auto-refresh in <span id="countdown-num">30</span>s</span>
@@ -193,6 +193,7 @@ var activeDomain = '';
 var selectedIdx = -1;
 var refreshTimer = null;
 var refreshCountdown = 30;
+var DOMAINS = ['fr.igraal.com', 'es.igraal.com', 'de.igraal.com', 'igraal.pl'];
 
 /* ── Helpers ─────────────────────────────── */
 function toIST(iso) {
@@ -379,11 +380,13 @@ function groupVisits(visits) {
 /* ── Render domain cards ─────────────────── */
 function renderDomainCards() {
   var bar = document.getElementById('domain-bar');
-  var html = '<div class="dcard' + (!activeDomain ? ' active' : '') + '" onclick="setDomain(\\'\\')"><h3>All Domains</h3><div class="val">' + allVisits.length + '</div><div class="sub">visits</div></div>';
-  Object.keys(byDomain).sort().forEach(function(d) {
-    var s = byDomain[d];
+  var totalVisits = allVisits.length;
+  var html = '<div class="dcard' + (!activeDomain ? ' active' : '') + '" onclick="setDomain(\\'\\')"><h3>All Domains</h3><div class="val">' + totalVisits + '</div><div class="sub">visits total</div></div>';
+  DOMAINS.forEach(function(d) {
+    var s = byDomain[d] || { visits: 0, consentGiven: 0, gtmLoaded: 0 };
     var pct = s.visits ? Math.round(s.consentGiven / s.visits * 100) : 0;
-    html += '<div class="dcard' + (activeDomain === d ? ' active' : '') + '" onclick="setDomain(\\'' + d + '\\')"><h3>' + d + '</h3><div class="val">' + s.visits + '</div><div class="sub">↑' + pct + '% consent · GTM ' + Math.round(s.gtmLoaded/s.visits*100) + '%</div></div>';
+    var gtmPct = s.visits ? Math.round(s.gtmLoaded / s.visits * 100) : 0;
+    html += '<div class="dcard' + (activeDomain === d ? ' active' : '') + '" onclick="setDomain(\\'' + d + '\\')"><h3>' + d + '</h3><div class="val">' + s.visits + '</div><div class="sub">↑' + pct + '% consent · GTM ' + gtmPct + '%</div></div>';
   });
   bar.innerHTML = html;
 }
@@ -753,6 +756,8 @@ function closeDetail() {
 /* ── Filter handlers ────────────────────── */
 function setDomain(d) {
   activeDomain = d;
+  var inp = document.getElementById('myip-input');
+  if (inp) inp.placeholder = (d || 'fr.igraal.com') + ' IP if different';
   renderDomainCards();
   renderList();
 }
