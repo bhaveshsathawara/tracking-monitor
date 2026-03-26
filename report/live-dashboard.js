@@ -497,6 +497,7 @@ function showDetail(idx) {
   html += '<div class="dp-tabs">';
   html += '<button class="dp-tab active" data-tab="timeline" onclick="switchTab(\\'timeline\\')">Timeline</button>';
   html += '<button class="dp-tab" data-tab="issues" onclick="switchTab(\\'issues\\')">Issues' + (errorCount > 0 ? ' <span style="color:#f87171;font-size:10px">● ' + errorCount + '</span>' : '') + '</button>';
+  html += '<button class="dp-tab" data-tab="consent" onclick="switchTab(\\'consent\\')">Consent</button>';
   html += '<button class="dp-tab" data-tab="pageview" onclick="switchTab(\\'pageview\\')">Payload</button>';
   html += '<button class="dp-tab" data-tab="datalayer" onclick="switchTab(\\'datalayer\\')">DataLayer</button>';
   html += '<button class="dp-tab" data-tab="raw" onclick="switchTab(\\'raw\\')">Raw JSON</button>';
@@ -628,6 +629,108 @@ function showDetail(idx) {
   }
   html += '</div>';
   html += '</div>'; // dp-tab-issues
+
+  /* ── Tab: Consent ── */
+  html += '<div id="dp-tab-consent" style="display:none">';
+
+  var pvConsent = (pv && pv.consent) || {};
+  var pcConsent = (pc && pc.consent) || {};
+  var pvPurposes = pvConsent.purposeConsents || {};
+  var pcPurposes = pcConsent.purposeConsents || {};
+  var pvVendors  = pvConsent.vendorConsents  || {};
+  var pcVendors  = pcConsent.vendorConsents  || {};
+
+  var purposeNames = {
+    '1':  'Store / access information on device',
+    '2':  'Select basic ads',
+    '3':  'Create a personalised ads profile',
+    '4':  'Select personalised ads',
+    '5':  'Create a personalised content profile',
+    '6':  'Select personalised content',
+    '7':  'Measure ad performance',
+    '8':  'Measure content performance',
+    '9':  'Apply market research to generate audience insights',
+    '10': 'Develop and improve products'
+  };
+
+  var finalConsent = pcConsent.given !== undefined ? pcConsent.given : pvConsent.given;
+
+  // Summary
+  html += '<div class="dp-section"><h3>Consent Summary</h3>';
+  html += row_(null, 'CMP Vendor',      (pcConsent.vendor || pvConsent.vendor || '<span style="color:#475569">—</span>'));
+  html += row_(null, 'Final Decision',  '<span style="color:' + consentColor(finalConsent) + ';font-weight:700;font-size:13px">' + consentLabel(finalConsent) + '</span>');
+  html += row_(null, 'Page View Snapshot', '<span style="color:' + consentColor(pvConsent.given) + '">' + consentLabel(pvConsent.given) + '</span>');
+  html += row_(null, 'Post-Consent Snapshot', pc ? '<span style="color:' + consentColor(pcConsent.given) + '">' + consentLabel(pcConsent.given) + '</span>' : '<span style="color:#475569">— not received yet</span>');
+  var consentExists = pcConsent.consentExists !== undefined ? pcConsent.consentExists : pvConsent.consentExists;
+  html += row_(null, 'Consent Cookie Exists',
+    consentExists === true  ? '<span style="color:#22c55e">✅ Yes — returning visitor</span>' :
+    consentExists === false ? '<span style="color:#f59e0b">⚠ No — new visitor / cookie cleared</span>' :
+    '<span style="color:#475569">— update GTM script to capture</span>');
+  html += '</div>';
+
+  // Purpose consents table
+  var hasPurposeData = Object.keys(pvPurposes).length > 0 || Object.keys(pcPurposes).length > 0;
+  var allPurposeKeys = hasPurposeData
+    ? Object.keys(Object.assign({}, pvPurposes, pcPurposes)).sort(function(a,b){ return parseInt(a)-parseInt(b); })
+    : ['1','2','3','4','5','6','7','8','9','10'];
+
+  html += '<div class="dp-section"><h3>IAB TCF Purpose Consents</h3>';
+  if (!hasPurposeData) {
+    html += '<div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:12px;font-size:12px;color:#94a3b8;margin-bottom:10px">Purpose-level data not yet captured. Update the GTM tag with the latest script to see per-purpose values.</div>';
+  }
+  html += '<table style="width:100%;border-collapse:collapse">';
+  html += '<thead><tr>'
+        + '<th style="padding:6px 10px;text-align:left;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">#</th>'
+        + '<th style="padding:6px 10px;text-align:left;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Purpose</th>'
+        + '<th style="padding:6px 10px;text-align:center;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Page View</th>'
+        + '<th style="padding:6px 10px;text-align:center;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Post-Consent</th>'
+        + '</tr></thead><tbody>';
+  allPurposeKeys.forEach(function(k) {
+    var pvVal = pvPurposes[k] !== undefined ? pvPurposes[k] : null;
+    var pcVal = pcPurposes[k] !== undefined ? pcPurposes[k] : null;
+    function fmtBool(val) {
+      return val === true  ? '<span style="color:#22c55e;font-weight:700">✅ true</span>'
+           : val === false ? '<span style="color:#f87171;font-weight:700">❌ false</span>'
+           : '<span style="color:#475569">—</span>';
+    }
+    var changed = pvVal !== null && pcVal !== null && pvVal !== pcVal;
+    html += '<tr style="border-bottom:1px solid #0f172a' + (changed ? ';background:#1a1a0a' : '') + '">'
+          + '<td style="padding:6px 10px;font-family:monospace;font-size:11px;color:#64748b">' + k + '</td>'
+          + '<td style="padding:6px 10px;font-size:11px;color:#e2e8f0">' + (purposeNames[k] || 'Purpose ' + k) + (changed ? ' <span style="color:#f59e0b;font-size:10px">↕ changed</span>' : '') + '</td>'
+          + '<td style="padding:6px 10px;text-align:center">' + fmtBool(pvVal) + '</td>'
+          + '<td style="padding:6px 10px;text-align:center">' + fmtBool(pcVal) + '</td>'
+          + '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Vendor consents
+  var allVendorKeys = Object.keys(Object.assign({}, pvVendors, pcVendors)).sort(function(a,b){ return parseInt(a)-parseInt(b); });
+  if (allVendorKeys.length > 0) {
+    html += '<div class="dp-section"><h3>Vendor Consents</h3>';
+    html += '<table style="width:100%;border-collapse:collapse">';
+    html += '<thead><tr>'
+          + '<th style="padding:5px 10px;text-align:left;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Vendor ID</th>'
+          + '<th style="padding:5px 10px;text-align:center;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Page View</th>'
+          + '<th style="padding:5px 10px;text-align:center;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Post-Consent</th>'
+          + '</tr></thead><tbody>';
+    allVendorKeys.slice(0, 30).forEach(function(k) {
+      var pvVal = pvVendors[k] !== undefined ? pvVendors[k] : null;
+      var pcVal = pcVendors[k] !== undefined ? pcVendors[k] : null;
+      function fmtV(val) {
+        return val === true ? '<span style="color:#22c55e">✅</span>' : val === false ? '<span style="color:#f87171">❌</span>' : '<span style="color:#475569">—</span>';
+      }
+      html += '<tr style="border-bottom:1px solid #0f172a">'
+            + '<td style="padding:5px 10px;font-family:monospace;font-size:11px;color:#94a3b8">Vendor ' + k + '</td>'
+            + '<td style="padding:5px 10px;text-align:center">' + fmtV(pvVal) + '</td>'
+            + '<td style="padding:5px 10px;text-align:center">' + fmtV(pcVal) + '</td>'
+            + '</tr>';
+    });
+    html += '</tbody></table>';
+    if (allVendorKeys.length > 30) html += '<div style="color:#64748b;font-size:11px;padding:8px 10px">+ ' + (allVendorKeys.length - 30) + ' more vendors</div>';
+    html += '</div>';
+  }
+
+  html += '</div>'; // dp-tab-consent
 
   /* ── Tab: Pageview Data ── */
   html += '<div id="dp-tab-pageview" style="display:none">';
@@ -776,7 +879,7 @@ document.getElementById('search').addEventListener('input', function() {
 
 /* ── Tab switching ──────────────────────── */
 function switchTab(tab) {
-  var tabs = ['timeline', 'issues', 'pageview', 'datalayer', 'raw'];
+  var tabs = ['timeline', 'issues', 'consent', 'pageview', 'datalayer', 'raw'];
   tabs.forEach(function(t) {
     var el = document.getElementById('dp-tab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
