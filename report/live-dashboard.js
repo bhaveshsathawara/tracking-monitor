@@ -147,7 +147,8 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
   <button class="filter-btn" data-filter="post-consent">Post-Consent only</button>
   <button class="filter-btn" data-filter="issues">Issues only</button>
   <button class="filter-btn" data-filter="you">My visits</button>
-  <input id="myip-input" type="text" placeholder="Your IP (auto-detected)" title="Auto-filled with your detected IP. Override only if you browse fr.igraal.com from a different network.">
+  <span style="color:#475569;font-size:11px">Dashboard IP: <code id="your-ip-display" style="color:#22c55e">—</code></span>
+  <input id="myip-input" type="text" placeholder="+ fr.igraal.com IP if different" title="If your IP when browsing fr.igraal.com differs from your dashboard IP, enter it here. Both IPs are searched." style="width:170px">
   <input id="search" type="text" placeholder="Search domain / path / IP…">
   <button class="filter-btn" onclick="reload()" style="margin-left:auto">↻ Refresh</button>
   <span id="countdown-display" style="color:#475569;font-size:11px">Auto-refresh in <span id="countdown-num">30</span>s</span>
@@ -214,9 +215,11 @@ function fullPath(v) {
 }
 
 function isMyVisit(v) {
-  if (!v) return false;
-  var checkIp = myIp || yourIp; // manual override first, then auto-detected IP
-  return !!(checkIp && v.ip === checkIp);
+  if (!v || !v.ip) return false;
+  // Check auto-detected dashboard IP AND any manually entered IP
+  if (yourIp && v.ip === yourIp) return true;
+  if (myIp && v.ip === myIp) return true;
+  return false;
 }
 
 function consentColor(given) {
@@ -805,15 +808,12 @@ function reload(silent) {
       allVisits = data.recentVisits || [];
       yourIp    = data.yourIp || '';
       byDomain  = data.byDomain || {};
-      // Auto-fill IP input on first load so "My visits" works immediately
-      var ipInput = document.getElementById('myip-input');
-      if (ipInput && !myIp && yourIp) {
-        ipInput.value = yourIp;
-        myIp = yourIp;
-      }
+      // Show auto-detected IP in the label (always updated)
+      var ipDisplay = document.getElementById('your-ip-display');
+      if (ipDisplay) ipDisplay.textContent = yourIp || '—';
       var now = new Date();
       document.getElementById('header-meta').innerHTML =
-        'Last updated: ' + toIST(now.toISOString()) + '<br>Your IP: <code style="color:#22c55e">' + yourIp + '</code>';
+        'Last updated: ' + toIST(now.toISOString()) + '<br>Dashboard IP: <code style="color:#22c55e">' + yourIp + '</code>';
       renderDomainCards();
       renderList();
       if (!silent) document.getElementById('loading').style.display = 'none';
