@@ -147,7 +147,7 @@ pre{background:#020617;border:1px solid #1e293b;border-radius:6px;padding:12px;f
   <button class="filter-btn" data-filter="post-consent">Post-Consent only</button>
   <button class="filter-btn" data-filter="issues">Issues only</button>
   <button class="filter-btn" data-filter="you">My visits</button>
-  <input id="myip-input" type="text" placeholder="Your fr.igraal.com IP…" title="Enter your IP to highlight your visits (different from dashboard viewer IP)">
+  <input id="myip-input" type="text" placeholder="Your IP (auto-detected)" title="Auto-filled with your detected IP. Override only if you browse fr.igraal.com from a different network.">
   <input id="search" type="text" placeholder="Search domain / path / IP…">
   <button class="filter-btn" onclick="reload()" style="margin-left:auto">↻ Refresh</button>
   <span id="countdown-display" style="color:#475569;font-size:11px">Auto-refresh in <span id="countdown-num">30</span>s</span>
@@ -215,8 +215,8 @@ function fullPath(v) {
 
 function isMyVisit(v) {
   if (!v) return false;
-  if (myIp && v.ip === myIp) return true;
-  return false;
+  var checkIp = myIp || yourIp; // manual override first, then auto-detected IP
+  return !!(checkIp && v.ip === checkIp);
 }
 
 function consentColor(given) {
@@ -805,6 +805,12 @@ function reload(silent) {
       allVisits = data.recentVisits || [];
       yourIp    = data.yourIp || '';
       byDomain  = data.byDomain || {};
+      // Auto-fill IP input on first load so "My visits" works immediately
+      var ipInput = document.getElementById('myip-input');
+      if (ipInput && !myIp && yourIp) {
+        ipInput.value = yourIp;
+        myIp = yourIp;
+      }
       var now = new Date();
       document.getElementById('header-meta').innerHTML =
         'Last updated: ' + toIST(now.toISOString()) + '<br>Your IP: <code style="color:#22c55e">' + yourIp + '</code>';
