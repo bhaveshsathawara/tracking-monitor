@@ -668,6 +668,42 @@ function showDetail(idx) {
     '<span style="color:#475569">— update GTM script to capture</span>');
   html += '</div>';
 
+  // Google Consent Mode v2
+  var GCM_KEYS = ['ad_storage', 'analytics_storage', 'ad_user_data', 'ad_personalization'];
+  var pvGcm = (pv && pv.googleConsentMode) || {};
+  var pcGcm = (pc && pc.googleConsentMode) || {};
+  var hasGcm = GCM_KEYS.some(function(k){ return pvGcm[k] || pcGcm[k]; });
+
+  html += '<div class="dp-section"><h3>Google Consent Mode v2</h3>';
+  if (!hasGcm) {
+    html += '<div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:12px;font-size:12px;color:#94a3b8">Not captured yet. Update the GTM tag with the latest script.</div>';
+  } else {
+    html += '<table style="width:100%;border-collapse:collapse">';
+    html += '<thead><tr>'
+          + '<th style="padding:6px 10px;text-align:left;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Parameter</th>'
+          + '<th style="padding:6px 10px;text-align:center;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Page View</th>'
+          + '<th style="padding:6px 10px;text-align:center;color:#64748b;font-size:10px;text-transform:uppercase;border-bottom:1px solid #1e293b">Post-Consent</th>'
+          + '</tr></thead><tbody>';
+    GCM_KEYS.forEach(function(k) {
+      var pvVal = pvGcm[k] || null;
+      var pcVal = pcGcm[k] || null;
+      function fmtGcm(val) {
+        if (!val) return '<span style="color:#475569">—</span>';
+        var granted = val === 'granted';
+        return '<span style="color:' + (granted ? '#22c55e' : '#f87171') + ';font-weight:700">'
+             + (granted ? '✅ granted' : '❌ denied') + '</span>';
+      }
+      var changed = pvVal && pcVal && pvVal !== pcVal;
+      html += '<tr style="border-bottom:1px solid #0f172a' + (changed ? ';background:#1a1a0a' : '') + '">'
+            + '<td style="padding:6px 10px;font-family:monospace;font-size:11px;color:#e2e8f0">' + k + (changed ? ' <span style="color:#f59e0b;font-size:10px">↕ changed</span>' : '') + '</td>'
+            + '<td style="padding:6px 10px;text-align:center">' + fmtGcm(pvVal) + '</td>'
+            + '<td style="padding:6px 10px;text-align:center">' + fmtGcm(pcVal) + '</td>'
+            + '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+  html += '</div>';
+
   // Purpose consents table
   var hasPurposeData = Object.keys(pvPurposes).length > 0 || Object.keys(pcPurposes).length > 0;
   var allPurposeKeys = hasPurposeData
